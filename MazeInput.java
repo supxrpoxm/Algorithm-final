@@ -2,7 +2,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
-import java.util.Scanner;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.ArrayList;
@@ -179,23 +178,4 @@ public class MazeInput {
         frame.setVisible(true);
     }
 
-    // ===================== MAIN =====================
-    public static void main(String[] args) {
-        Scanner sc = new Scanner(System.in);
-        System.out.print("Enter file name: ");
-        String fileName = sc.nextLine();
-
-        try {
-            if (Files.exists(Paths.get(fileName))) {
-                List<String[]> grid = parseMapFile(fileName);
-                displayGrid(grid);
-            } else {
-                System.out.println("File not found!");
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            sc.close();
-        }
-    }
 }

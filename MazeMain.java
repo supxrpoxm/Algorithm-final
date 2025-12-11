@@ -1,11 +1,7 @@
 import javax.swing.*;
-import javax.swing.table.TableCellRenderer;
 import java.awt.*;
 import java.io.IOException;
 import java.util.List;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedList;
 
 public class MazeMain {
 
