@@ -1,103 +1,110 @@
-import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.*;
+import javax.swing.table.DefaultTableCellRenderer;
 import java.awt.*;
-import java.util.*;
-import java.awt.Point;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
-/**
- * PathRenderer extends DefaultTableCellRenderer to:
- * - show arrows for path cells (green arrows)
- * - otherwise show numbers / S / G / walls with colors
- *
- * Usage:
- *   PathRenderer r = new PathRenderer(tableData);
- *   table.getColumnModel().getColumn(i).setCellRenderer(r);
- *   r.setPath(pathList);
- */
 public class PathRenderer extends DefaultTableCellRenderer {
+    private List<Point> path; 
+    private final String[][] mapData;
+    private final Map<Point, Point> pathMap = new HashMap<>();
 
-    private final String[][] grid;
-    private Set<Point> pathSet = new HashSet<>();
-    private Map<Point, Character> arrowMap = new HashMap<>(); // map cell -> arrow char
-
-    public PathRenderer(String[][] gridData) {
-        this.grid = gridData;
+    public PathRenderer(String[][] mapData) {
+        this.mapData = mapData;
+        setOpaque(true); 
+        setHorizontalAlignment(CENTER); 
     }
 
-    // set path as list of Points (row,col) from start -> goal
     public void setPath(List<Point> path) {
-        pathSet.clear();
-        arrowMap.clear();
-        if (path == null) return;
-        for (Point p : path) pathSet.add(new Point(p.x, p.y));
-        // build arrows for path steps (for each cell except goal: arrow towards next)
-        for (int i = 0; i + 1 < path.size(); i++) {
-            Point cur = path.get(i);
-            Point nx = path.get(i + 1);
-            char arrow = getArrowForDelta(nx.x - cur.x, nx.y - cur.y);
-            arrowMap.put(new Point(cur.x, cur.y), arrow);
+        this.path = path;
+        pathMap.clear();
+        if (path != null && path.size() > 1) {
+            for (int i = 0; i < path.size() - 1; i++) {
+                pathMap.put(path.get(i), path.get(i + 1));
+            }
         }
-    }
-
-    private char getArrowForDelta(int dr, int dc) {
-        if (dr == -1 && dc == 0) return '\u2191'; // up
-        if (dr == 1 && dc == 0) return '\u2193';  // down
-        if (dr == 0 && dc == -1) return '\u2190'; // left
-        if (dr == 0 && dc == 1) return '\u2192';  // right
-        return '\u25CF'; // fallback dot
     }
 
     @Override
-    public Component getTableCellRendererComponent(JTable table, Object value,
-                                                   boolean isSelected, boolean hasFocus,
-                                                   int row, int column) {
-        Component comp = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+    public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+        Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+        String cellValue = (String) value;
+        JLabel label = (JLabel) c;
+        
+        label.setFont(table.getFont()); 
 
-        String v = value == null ? "" : value.toString();
+        // 1. ตั้งค่าพื้นหลังและสัญลักษณ์ (S, G/E, X/#)
+        Color wallColor = new Color(50, 50, 50); 
+        
+        if ("X".equals(cellValue) || "#".equals(cellValue)) {
+            // ผนัง
+            c.setBackground(wallColor); 
+            label.setText(""); 
+            label.setForeground(wallColor); 
+        } else if ("S".equals(cellValue)) {
+            // จุดเริ่มต้น
+            c.setBackground(new Color(193, 255, 193)); 
+            label.setText("S"); 
+            label.setForeground(Color.BLACK);
+        } else if ("E".equals(cellValue) || "G".equals(cellValue)) {
+            // จุดสิ้นสุด
+            c.setBackground(new Color(255, 179, 179)); 
+            label.setText("G"); 
+            label.setForeground(Color.BLACK);
+        } else {
+            // *** ทางเดินทั่วไป (รวม Cost) - แก้ไข Cost 1 ให้แสดงผลเป็น 1 ***
+            c.setBackground(Color.WHITE); 
+            
+            if (".".equals(cellValue)) {
+                // ถ้าเป็นจุด '.' (ค่าว่างที่ถูกแทนที่) ให้แสดง '.'
+                label.setText("."); 
+            } else if (cellValue.length() >= 1 && Character.isDigit(cellValue.charAt(0))) {
+                // ถ้าเป็นตัวเลข (รวมถึง "1" ด้วย) ให้แสดงตัวเลขนั้น
+                label.setText(cellValue); 
+            } else {
+                // หากค่าไม่ตรงกับที่คาดไว้ (Empty String หรือสัญลักษณ์ที่ไม่รู้จัก) ให้แสดง "." เป็นค่าเริ่มต้น
+                label.setText("."); 
+            }
+            label.setForeground(Color.BLACK);
+        }
+        
+        // 2. ตกแต่งเส้นทาง (Path) ให้เป็นลูกศรสีเขียว (ทับข้อความ/สีพื้นหลังบางส่วน)
+        Point current = new Point(row, column);
+        if (path != null) {
+            Color pathColor = new Color(144, 238, 144); // เขียวอ่อนสำหรับพื้นหลังเส้นทาง
+            Color arrowColor = new Color(0, 100, 0); // เขียวเข้มสำหรับลูกศร
 
-        // background / foreground defaults
-        comp.setBackground(Color.WHITE);
-        comp.setForeground(Color.BLACK);
-
-        if ("X".equals(v)) {
-            comp.setBackground(Color.BLACK);
-            comp.setForeground(Color.WHITE);
-            setText("");
-            return comp;
+            if (pathMap.containsKey(current)) {
+                c.setBackground(pathColor); 
+                
+                Point next = pathMap.get(current);
+                String arrow = getDirectionArrow(current, next);
+                label.setText(arrow);
+                label.setForeground(arrowColor); 
+            } else if (path.contains(current) && !cellValue.equals("S") && !cellValue.equals("E") && !cellValue.equals("G")) {
+                c.setBackground(pathColor);
+            }
+        }
+        
+        // 3. ทับสัญลักษณ์ 'S' และ 'G' กลับเข้าไปใหม่ (กรณีที่เส้นทางวิ่งผ่าน)
+        if ("S".equals(cellValue)) {
+            label.setText("S");
+            label.setForeground(Color.BLACK);
+        } else if ("E".equals(cellValue) || "G".equals(cellValue)) {
+            label.setText("G");
+            label.setForeground(Color.BLACK);
         }
 
-        // if this cell is on path, show arrow (green)
-        Point p = new Point(row, column);
-        if (arrowMap.containsKey(p)) {
-            char arrow = arrowMap.get(p);
-            setText(String.valueOf(arrow));
-            setForeground(new Color(0, 128, 0)); // green
-            setHorizontalAlignment(SwingConstants.CENTER);
-            comp.setBackground(Color.WHITE);
-            return comp;
-        }
-
-        // goal cell: show G
-        if ("G".equals(v)) {
-            setText("G");
-            setForeground(Color.RED);
-            setHorizontalAlignment(SwingConstants.CENTER);
-            return comp;
-        }
-
-        // start cell: S
-        if ("S".equals(v)) {
-            setText("S");
-            setForeground(Color.GREEN);
-            setHorizontalAlignment(SwingConstants.CENTER);
-            return comp;
-        }
-
-        // otherwise show numeric value (blue)
-        setText(v);
-        setForeground(Color.BLUE);
-        setHorizontalAlignment(SwingConstants.CENTER);
-        return comp;
+        return c;
+    }
+    
+    // Helper method สำหรับกำหนดลูกศรทิศทาง
+    private String getDirectionArrow(Point current, Point next) {
+        if (next.y > current.y) return "\u2192"; // Right arrow
+        if (next.y < current.y) return "\u2190"; // Left arrow
+        if (next.x < current.x) return "\u2191"; // Up arrow
+        if (next.x > current.x) return "\u2193"; // Down arrow
+        return "•";
     }
 }
