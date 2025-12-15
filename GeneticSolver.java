@@ -1,185 +1,278 @@
 import java.awt.Point;
 import java.util.*;
-//import java.util.stream.Collectors;
 
 public class GeneticSolver {
 
-    public static List<Point> findPath(char[][] grid) {
+    // ===================== CELL COST =====================
+    private static int weight(String v) {
+        if (v == null) return -1;
+        if (v.equals("#") || v.equals("X")) return -1;
+        if (v.equals("S") || v.equals("G") || v.equals("E")) return 0;
+        try {
+            return Integer.parseInt(v);
+        } catch (Exception e) {
+            return 1;
+        }
+    }
+
+    // ===================== PUBLIC API =====================
+    public static List<Point> findPath(String[][] grid) {
+
         int n = grid.length;
         int m = grid[0].length;
-        
+
         int sx = -1, sy = -1, gx = -1, gy = -1;
-        
-        for (int i = 0; i < n; i++) {
+
+        for (int i = 0; i < n; i++)
             for (int j = 0; j < m; j++) {
-                if (grid[i][j] == 'S') { sx = i; sy = j; }
-                if (grid[i][j] == 'G' || grid[i][j] == 'E') { gx = i; gy = j; }
+                if (grid[i][j].equals("S")) { sx = i; sy = j; }
+                if (grid[i][j].equals("G") || grid[i][j].equals("E")) {
+                    gx = i; gy = j;
+                }
             }
-        }
 
-        if (sx == -1 || gx == -1) {
-            return Collections.emptyList();
-        }
+        if (sx == -1 || gx == -1) return Collections.emptyList();
 
-        // ====== GA PARAMETERS ======
-        int POP = 500;              
-        int GEN = 3000;              
-        int ELITE = 10;             
-        int LEN = Math.max(30, n * m); 
-        double MUT_RATE = 0.08;     
-        int TOURNAMENT_K = 5;       
-        long SEED = System.nanoTime();
+        // ============ PURE GA PARAMETERS ============
+        final int POP = 400;
+        final int GEN = 3000;
+        final int LEN = n * m;
+        final int ELITE = 10;
+        final double MUT = 0.07;
+        final double CROSS = 0.9;
+        final int TOURN = 5;
 
-        Random rand = new Random(SEED);
-
-        // Genes: 0=U,1=D,2=L,3=R
         int[] dx = {-1, 1, 0, 0};
         int[] dy = {0, 0, -1, 1};
 
-        int[][] pop = new int[POP][LEN];
-        for (int i = 0; i < POP; i++) {
-            for (int j = 0; j < LEN; j++) pop[i][j] = rand.nextInt(4);
-        }
+        Random rand = new Random();
 
-        int[][] newPop = new int[POP][LEN];
-        int[] fit = new int[POP];
+        int[][] pop = initPopulation(POP, LEN, rand);
+        int[][] next = new int[POP][LEN];
+        double[] fitness = new double[POP];
 
-        int bestFitEver = Integer.MIN_VALUE;
-        int[] bestChromEver = new int[LEN];
-        
-        // --- GA Loop ---
-        for (int g = 0; g < GEN; g++) {
-            // ----- Evaluate Fitness -----
+        int[] bestChrom = null;
+        List<Point> bestPath = null;
+        int bestCost = Integer.MAX_VALUE;
+
+        // ===================== GA LOOP =====================
+        for (int gen = 0; gen < GEN; gen++) {
+
             for (int i = 0; i < POP; i++) {
-                // *** แก้ไข: ประกาศ x, y ภายในลูปเพื่อให้ขอบเขตชัดเจน ***
-                int x = sx, y = sy;
-                int steps = 0;
-                int hits = 0;
-                int revisits = 0;
+                FitnessResult r = evaluate(
+                        pop[i], sx, sy, gx, gy, n, m, grid, dx, dy
+                );
 
-                boolean[][] visited = new boolean[n][m];
-                visited[x][y] = true;
+                // ใช้ fitness ปกติสำหรับ selection
+                fitness[i] = fitness(r);
 
-                boolean reached = false;
-                int reachAt = -1;
+                if (r.reached) {
+                    // สร้าง path และ clean loop
+                    List<Point> path = buildPath(pop[i], sx, sy, gx, gy, n, m, grid, dx, dy);
+                    List<Point> cleanedPath = simplifyPath(path, gx, gy);
 
-                for (int t = 0; t < LEN; t++) {
-                    int move = pop[i][t];
-                    int nx = x + dx[move];
-                    int ny = y + dy[move];
+                    int c = calculatePathCost(cleanedPath, grid);
 
-                    if (nx < 0 || ny < 0 || nx >= n || ny >= m || grid[nx][ny] == '#') {
-                        hits++;
-                        continue;
+                    // เก็บ chromosome + path ที่ cost ต่ำสุด
+                    if (c < bestCost) {
+                        bestCost = c;
+                        bestChrom = pop[i].clone();
+                        bestPath = cleanedPath;
                     }
-
-                    x = nx; y = ny;
-                    steps++;
-
-                    if (visited[x][y]) revisits++;
-                    visited[x][y] = true;
-
-                    if (x == gx && y == gy) {
-                        reached = true;
-                        reachAt = t + 1;
-                        break;
-                    }
-                }
-
-                int manhattan = Math.abs(x - gx) + Math.abs(y - gy);
-
-                int score;
-                if (reached) {
-                    score = 1_000_000 - (reachAt * 1000) - (hits * 50);
-                } else {
-                    score = - (manhattan * 500) - (hits * 80) - (revisits * 10) - (steps * 1);
-                }
-                fit[i] = score;
-
-                if (score > bestFitEver) {
-                    bestFitEver = score;
-                    System.arraycopy(pop[i], 0, bestChromEver, 0, LEN);
                 }
             }
 
-            if (bestFitEver > 500_000) break;
-
-            // ----- Selection, Crossover, Mutation -----
+            // Selection + Elitism
             Integer[] idx = new Integer[POP];
             for (int i = 0; i < POP; i++) idx[i] = i;
-            Arrays.sort(idx, (a, b) -> Integer.compare(fit[b], fit[a]));
+            Arrays.sort(idx, (a, b) -> Double.compare(fitness[b], fitness[a]));
 
-            // copy elites
-            for (int e = 0; e < ELITE; e++) {
-                int src = idx[e];
-                System.arraycopy(pop[src], 0, newPop[e], 0, LEN);
-            }
+            // Elitism
+            for (int i = 0; i < ELITE; i++)
+                System.arraycopy(pop[idx[i]], 0, next[i], 0, LEN);
 
-            // selection (tournament) + crossover + mutation
+            // Reproduction
             for (int i = ELITE; i < POP; i++) {
-                
-                // Tournament selection for parent 1
-                int best_idx_in_tournament_p1 = rand.nextInt(POP);
-                for (int k = 1; k < TOURNAMENT_K; k++) {
-                    int cand_idx_in_tournament = rand.nextInt(POP);
-                    if (fit[idx[cand_idx_in_tournament]] > fit[idx[best_idx_in_tournament_p1]]) {
-                        best_idx_in_tournament_p1 = cand_idx_in_tournament;
-                    }
-                }
-                int p1 = idx[best_idx_in_tournament_p1]; // ดึง Index จริงของ Pop
+                int p1 = idx[tournament(idx, fitness, rand, TOURN)];
+                int p2 = idx[tournament(idx, fitness, rand, TOURN)];
 
-                // Tournament selection for parent 2
-                int best_idx_in_tournament_p2 = rand.nextInt(POP);
-                for (int k = 1; k < TOURNAMENT_K; k++) {
-                    int cand_idx_in_tournament = rand.nextInt(POP);
-                    if (fit[idx[cand_idx_in_tournament]] > fit[idx[best_idx_in_tournament_p2]]) {
-                        best_idx_in_tournament_p2 = cand_idx_in_tournament;
-                    }
-                }
-                int p2 = idx[best_idx_in_tournament_p2]; // ดึง Index จริงของ Pop
+                if (rand.nextDouble() < CROSS)
+                    crossover(pop[p1], pop[p2], next[i], LEN, rand);
+                else
+                    System.arraycopy(pop[p1], 0, next[i], 0, LEN);
 
-                // one-point crossover
-                int cut = 1 + rand.nextInt(LEN - 1);
-                for (int j = 0; j < LEN; j++) {
-                    newPop[i][j] = (j < cut) ? pop[p1][j] : pop[p2][j];
-                }
-
-                // mutation (per gene)
-                for (int j = 0; j < LEN; j++) {
-                    if (rand.nextDouble() < MUT_RATE) {
-                        newPop[i][j] = rand.nextInt(4);
-                    }
-                }
+                mutate(next[i], MUT, rand);
             }
 
-            // swap populations
-            int[][] tmp = pop; pop = newPop; newPop = tmp;
+            int[][] tmp = pop; pop = next; next = tmp;
         }
-        
-        // --- Reconstruct Path จาก Best Chromosome ---
-        int x = sx, y = sy; // x, y ถูกประกาศที่นี่เพื่อใช้ในการสร้างเส้นทางสุดท้าย
-        List<Point> finalPath = new LinkedList<>();
-        finalPath.add(new Point(sx, sy));
 
-        for (int t = 0; t < LEN; t++) {
-            int mv = bestChromEver[t];
-            int nx = x + dx[mv], ny = y + dy[mv];
-            
-            if (nx < 0 || ny < 0 || nx >= n || ny >= m || grid[nx][ny] == '#') {
+        // ถ้าไม่มี path ถึง goal
+        if (bestPath == null) return Collections.emptyList();
+
+        return bestPath;
+    }
+
+    // ===================== FITNESS =====================
+    private static class FitnessResult {
+        boolean reached;
+        int cost, steps, revisits, manhattan;
+    }
+
+    private static FitnessResult evaluate(
+            int[] c, int sx, int sy, int gx, int gy,
+            int n, int m, String[][] g,
+            int[] dx, int[] dy) {
+
+        FitnessResult r = new FitnessResult();
+        boolean[][] visited = new boolean[n][m];
+
+        int x = sx, y = sy;
+        visited[x][y] = true;
+
+        for (int mv : c) {
+            int nx = x + dx[mv];
+            int ny = y + dy[mv];
+
+            if (nx < 0 || ny < 0 || nx >= n || ny >= m) continue;
+            int w = weight(g[nx][ny]);
+            if (w < 0) continue;
+
+            x = nx; y = ny;
+            r.steps++;
+            r.cost += w;
+
+            if (visited[x][y]) r.revisits++;
+            visited[x][y] = true;
+
+            if (x == gx && y == gy) {
+                r.reached = true;
+                break;
+            }
+        }
+
+        r.manhattan = Math.abs(x - gx) + Math.abs(y - gy);
+        return r;
+    }
+
+    private static double fitness(FitnessResult r) {
+        if (!r.reached)
+            return -1e6 - r.manhattan * 1000 - r.steps * 10;
+        return 1e8 - r.cost * 1e4 - r.steps * 100 - r.revisits * 500;
+    }
+
+    // ===================== GA OPERATORS =====================
+    private static int[][] initPopulation(int p, int len, Random r) {
+        int[][] pop = new int[p][len];
+        for (int i = 0; i < p; i++)
+            for (int j = 0; j < len; j++)
+                pop[i][j] = r.nextInt(4);
+        return pop;
+    }
+
+    private static int tournament(Integer[] idx, double[] f, Random r, int k) {
+        int best = r.nextInt(idx.length);
+        for (int i = 1; i < k; i++) {
+            int c = r.nextInt(idx.length);
+            if (f[idx[c]] > f[idx[best]]) best = c;
+        }
+        return best;
+    }
+
+    private static void crossover(int[] a, int[] b, int[] c, int len, Random r) {
+        int p1 = r.nextInt(len);
+        int p2 = r.nextInt(len);
+        if (p1 > p2) { int t = p1; p1 = p2; p2 = t; }
+        for (int i = 0; i < len; i++)
+            c[i] = (i >= p1 && i < p2) ? b[i] : a[i];
+    }
+
+    private static void mutate(int[] c, double rate, Random r) {
+        for (int i = 0; i < c.length; i++)
+            if (r.nextDouble() < rate)
+                c[i] = r.nextInt(4);
+    }
+
+    // ===================== PATH BUILD =====================
+    private static List<Point> buildPath(
+            int[] c, int sx, int sy, int gx, int gy,
+            int n, int m, String[][] g,
+            int[] dx, int[] dy) {
+
+        List<Point> path = new ArrayList<>();
+        int x = sx, y = sy;
+        path.add(new Point(x, y));
+
+        for (int mv : c) {
+            int nx = x + dx[mv];
+            int ny = y + dy[mv];
+
+            if (nx < 0 || ny < 0 || nx >= n || ny >= m) continue;
+            if (weight(g[nx][ny]) < 0) continue;
+
+            x = nx; y = ny;
+            path.add(new Point(x, y));
+
+            if (x == gx && y == gy) break;
+        }
+        return path;
+    }
+
+    // ===================== SIMPLIFY PATH =====================
+    private static List<Point> simplifyPath(List<Point> rawPath, int gx, int gy) {
+        if (rawPath.size() <= 1) return rawPath;
+
+        List<Point> cleaned = new ArrayList<>();
+        Map<String, Integer> lastSeen = new HashMap<>();
+
+        cleaned.add(rawPath.get(0));
+        lastSeen.put(rawPath.get(0).x + "," + rawPath.get(0).y, 0);
+
+        for (int i = 1; i < rawPath.size(); i++) {
+            Point cur = rawPath.get(i);
+            String key = cur.x + "," + cur.y;
+
+            if (cur.x == gx && cur.y == gy) {
+                if (!cleaned.get(cleaned.size() - 1).equals(cur))
+                    cleaned.add(cur);
+                break;
+            }
+
+            if (lastSeen.containsKey(key)) {
+                int loopStart = lastSeen.get(key);
+                cleaned = new ArrayList<>(cleaned.subList(0, loopStart + 1));
+                lastSeen.clear();
+                for (int j = 0; j < cleaned.size(); j++) {
+                    Point p = cleaned.get(j);
+                    lastSeen.put(p.x + "," + p.y, j);
+                }
+                cleaned.add(cur);
+                lastSeen.put(key, cleaned.size() - 1);
                 continue;
             }
-            
-            x = nx; y = ny;
-            finalPath.add(new Point(x, y));
 
-            if (x == gx && y == gy) { break; }
+            cleaned.add(cur);
+            lastSeen.put(key, cleaned.size() - 1);
         }
 
-        return finalPath;
+        return cleaned;
     }
-    
-    public static int pathCost(char[][] mapData, List<Point> path) {
-        if (path == null || path.isEmpty()) return 0;
-        return path.size();
+
+    // ===================== COST =====================
+    public static int calculatePathCost(List<Point> path, String[][] grid) {
+        int cost = 0;
+        for (int i = 1; i < path.size(); i++) {
+            int w = weight(grid[path.get(i).x][path.get(i).y]);
+            if (w > 0) cost += w;
+        }
+        return cost;
+    }
+
+    public static int pathCost(List<Point> path, String[][] grid) {
+        return calculatePathCost(path, grid);
+    }
+
+    public static int pathCost(String[][] grid, List<Point> path) {
+        return calculatePathCost(path, grid);
     }
 }
